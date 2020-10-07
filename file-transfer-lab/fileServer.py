@@ -1,71 +1,90 @@
 #!/usr/bin/env python3
 
-import os,sys,socket,re
-from stat import *  #for byte size of file
+#!/usr/bin/env python3
+
+import sys
 sys.path.append("../lib")       # for params
-import params
+import re, socket, params, os
 
-HOST = '127.0.0.1'# The server's hostname or IP address
-PORT = 65432# The port used by the server
-
-
-def getSize(filename):
-	st = os.stat(filename)
-	return st.st_size#filesize in bytes
-
-from framedSock import framedSend, framedReceive
+HOST = '127.0.0.1'# Standard loopback interface address (localhost)
+PORT = 65432# Port to listen on (non-privileged ports are > 1023)
 
 switchesVarDefaults = (
-	(('-s', '--server'), 'server', "127.0.0.1:50001"),
-	(('-d', '--debug'), "debug", False), # boolean (set if present)
-	(('-?', '--usage'), "usage", False), # boolean (set if present)
+    (('-l', '--listenPort') ,'listenPort', 50001),
+    (('-d', '--debug'), "debug", False), # boolean (set if present)
+    (('-?', '--usage'), "usage", False), # boolean (set if present)
     )
 
-progname = "framedClient"
-
-while True:
-	print("Hello User, type the name of your file you would like to send.")
-	fileName = input("$ ")
-	if fileName == "exit":
-		break
-
-	try:
-		fs = open(fileName, 'rb')
-		break
-	except IOError:
-		pass
-		print("File not found, please try again.")
-
+progname = "echoserver"
 paramMap = params.parseParams(switchesVarDefaults)
 
-server, usage, debug  = paramMap["server"], paramMap["usage"], paramMap["debug"]
+debug, listenPort = paramMap['debug'], paramMap['listenPort']
 
-if usage:
+if paramMap['usage']:
     params.usage()
 
-try:
-	serverHost, serverPort = re.split(":", server)
-	serverPort = int(serverPort)
-except:
-    print("Can't parse server:port from '%s'" % server)
-    sys.exit(1)
+def writeFile(filename, biteSyze, conn): #FIXME: second file writing does nothing 
+	i = 0
+	fileWriter = open(filename, 'wb')
+	while (i < int(biteSyze)): #Somehow read until the end of the file
+			data = conn.recv(1024)
+			if not data:
+				break
+			conn.sendall(data)
+			fileWriter.write(data)
+			i += len(data)
+			print(data)
 
-addrFamily = socket.AF_INET
-socktype = socket.SOCK_STREAM
-addrPort = (serverHost, serverPort)
+	fileWriter.close()
 
-s = socket.socket(addrFamily, socktype)
+def main():
+#	
+	lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # listener socket
+	bindAddr = ("127.0.0.1", listenPort)
+	lsock.bind(bindAddr)
+	lsock.listen(5)
+	print("listening on:", bindAddr)
 
-if s is None:
-    print('could not open socket')
-    sys.exit(1)
+	while True:
+		sock, addr = lsock.accept()
 
-s.connect(addrPort)
+		from framedSock import framedSend, framedReceive
+		
+		if not os.fork(): #fork process to receive multiple connections
+			print("new child process handling connection from", addr)
+			payload = ""
+			
+			#receive file name and contents
+			fileName, fileContents = framedReceive(sock, debug)
+			
+			
+			if debug: print("rec'd: ", payload)
 
-fileContents = fs.read()
+			if payload is None:
+				print("File contents were empty, exiting...")
+				sys.exit(1)
+			
+			#receive fileName
+			fileName = fileName.decode()
+			if fileName == "exit":
+				sys.exit(0)
+				
+			try:
+				#write file to transfer dir
+				if not os.path.isfile("./transfer/" + fileName):
+					file = open("./transfer/" + fileName, 'w+b')
+					file.write(fileContents)
+					file.close()
+					print("File:", fileName, "successfully accepted!")
+					sys.exit(0)
+				else:
+					print("File: ", fileName, "already exists.")
+					sys.exit(1)
+			except FileNotFoundError:
+				print("File Not Found")
+				sys.exit(1)
+	
+if __name__ == '__main__':
+    main()
 
-if len(fileContents) == 0:
-    print("File is empty, exiting")
-    sys.exit(1)
-
-framedSend(s, fileName, fileContents, debug)
+	
