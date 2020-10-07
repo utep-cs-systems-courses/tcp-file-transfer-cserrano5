@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+#!/usr/bin/env python3
+
 import os,sys,socket,re
 from stat import *  #for byte size of file
 sys.path.append("../lib")       # for params
